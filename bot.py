@@ -1,0 +1,112 @@
+import asyncio
+import os
+import re
+import logging
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
+from aiogram.filters import CommandStart
+from aiogram.enums import ParseMode
+from aiogram.client.session.aiohttp import AiohttpSession
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = None  # заполним автоматически при первом сообщении
+
+ALLOWED_USERS = [1177412895]
+
+client = OpenAI(
+    api_key=os.environ["AIROUTER_API_KEY"],
+    base_url="https://api.ai-router.app/v1",
+)
+
+# Если используете прокси (socks5/http), раскомментируйте:
+# session = AiohttpSession(proxy=os.environ["PROXY_URL"])
+# bot = Bot(token=BOT_TOKEN, session=session)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    # экранируем HTML-спецсимволы, чтобы не сломать парсер
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # заголовки -> жирный текст
+    text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    # **bold** -> <b>bold</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # *italic* -> <i>italic</i>
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+    # `code` -> <code>code</code>
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+    return text
+
+
+async def send_formatted(chat_id: int, text: str):
+    formatted = markdown_to_telegram_html(text)
+    try:
+        await bot.send_message(chat_id, formatted, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logging.warning(f"HTML parse failed, sending plain text: {e}")
+        await bot.send_message(chat_id, text)
+
+
+def ask_llm(prompt: str) -> str:
+    completion = client.chat.completions.create(
+        model="deepseek/deepseek-v4-flash",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1500,
+    )
+    return completion.choices[0].message.content
+
+
+@dp.message(CommandStart())
+async def start_handler(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("Извините, этот бот приватный.")
+        return
+    global CHAT_ID
+    CHAT_ID = message.chat.id
+    await message.answer("Привет! Пиши что угодно — отвечу через LLM. Раз в час буду присылать что-то полезное сам.")
+
+
+@dp.message(F.text)
+async def message_handler(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("Извините, этот бот приватный.")
+        return
+    global CHAT_ID
+    CHAT_ID = message.chat.id
+    await bot.send_chat_action(message.chat.id, "typing")
+    try:
+        answer = ask_llm(message.text)
+        await send_formatted(message.chat.id, answer)
+    except Exception as e:
+        await message.answer(f"Ошибка при обращении к LLM: {e}")
+
+
+async def periodic_message():
+    if CHAT_ID is None:
+        return
+    try:
+        text = ask_llm("Дай один короткий полезный совет или интересный факт на сегодня.")
+        await send_formatted(CHAT_ID, text)
+    except Exception as e:
+        logging.error(f"Periodic message failed: {e}")
+
+
+async def main():
+    scheduler = AsyncIOScheduler(timezone="Europe/Paris")
+    scheduler.add_job(periodic_message, "interval", hours=1)
+    scheduler.start()
+
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
