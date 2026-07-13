@@ -103,7 +103,7 @@ async def periodic_message():
 
 async def main():
     scheduler = AsyncIOScheduler(timezone="Europe/Paris")
-    scheduler.add_job(periodic_message, "interval", hours=1)
+    scheduler.add_job(periodic_message, "interval", hours=4)
     scheduler.start()
 
     await dp.start_polling(bot)
