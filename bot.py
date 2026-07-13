@@ -19,7 +19,8 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = None  # заполним автоматически при первом сообщении
 
-ALLOWED_USERS = [1177412895]
+ALLOWED_USERS = [int(uid.strip()) for uid in os.environ["ALLOWED_USERS"].split(",")]
+
 
 client = OpenAI(
     api_key=os.environ["AIROUTER_API_KEY"],
