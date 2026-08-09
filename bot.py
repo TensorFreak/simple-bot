@@ -94,7 +94,9 @@ async def stream_llm_to_message(chat_id: int, prompt: str):
         now = asyncio.get_event_loop().time()
         if now - last_edit >= MIN_INTERVAL and buffer != last_sent:
             try:
-                await bot.edit_message_text(buffer, chat_id, message_id)
+                await bot.edit_message_text(
+                    buffer, chat_id=chat_id, message_id=message_id
+                )
                 last_sent = buffer
                 last_edit = now
             except Exception as e:
@@ -102,19 +104,24 @@ async def stream_llm_to_message(chat_id: int, prompt: str):
                 logging.debug(f"skip intermediate edit: {e}")
 
     if not buffer:
-        await bot.edit_message_text("(пустой ответ)", chat_id, message_id)
+        await bot.edit_message_text(
+            "(пустой ответ)", chat_id=chat_id, message_id=message_id
+        )
         return
 
     # финальное сообщение — уже с HTML-форматированием
     formatted = markdown_to_telegram_html(buffer)
     try:
         await bot.edit_message_text(
-            formatted, chat_id, message_id, parse_mode=ParseMode.HTML
+            formatted, chat_id=chat_id, message_id=message_id,
+            parse_mode=ParseMode.HTML,
         )
     except Exception as e:
         logging.warning(f"HTML parse failed on final edit: {e}")
         if buffer != last_sent:
-            await bot.edit_message_text(buffer, chat_id, message_id)
+            await bot.edit_message_text(
+                buffer, chat_id=chat_id, message_id=message_id
+            )
 
 
 @dp.message(CommandStart())
